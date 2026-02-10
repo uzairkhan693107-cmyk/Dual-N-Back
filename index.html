@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dual N-Back | Mental Gym</title>
+    <link rel="icon" href="icon.png" type="image/png">
+    <link rel="manifest" href="manifest.json">
+    <script src="js/chart.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('service-worker.js');
+        }
+    </script>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --grid-color: #1e293b;
+            --active-color: #38bdf8;
+            --text-color: #e2e8f0;
+            --success-color: #22c55e;
+            --danger-color: #ef4444;
+            --accent-glow: 0 0 15px rgba(56, 189, 248, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            /* Use dynamic viewport height for mobile browsers */
+            min-height: 100dvh;
+            padding: 15px;
+        }
+
+        h1,
+        h2,
+        h3 {
+            font-weight: 600;
+            text-align: center;
+        }
+
+        #app {
+            width: 100%;
+            max-width: 500px;
+            /* Slightly tighter max-width for better focus */
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            flex-grow: 1;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--grid-color);
+            padding: 20px;
+            border-radius: 16px;
+            /* More rounded */
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            width: 100%;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .stat-box {
+            text-align: center;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+        }
+
+        .stat-value {
+            font-size: 1.4rem;
+            font-weight: bold;
+            color: var(--active-color);
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            opacity: 0.8;
+        }
+
+        /* Game Area */
+        #game-area {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            flex-grow: 1;
+        }
+
+        /* Responsive Grid */
+        .n-back-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            /* Responsive Size */
+            width: 100%;
+            max-width: 320px;
+            aspect-ratio: 1 / 1;
+        }
+
+        .grid-cell {
+            background: #334155;
+            border-radius: 8px;
+            transition: background-color 0.1s;
+        }
+
+        .grid-cell.active {
+            background: var(--active-color);
+            box-shadow: var(--accent-glow);
+            transform: scale(0.96);
+        }
+
+        /* Controls */
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            /* Side by side on standard */
+            gap: 15px;
+            width: 100%;
+            margin-top: auto;
+            /* Push to bottom if space permits */
+        }
+
+        button {
+            background: var(--active-color);
+            color: #000;
+            border: none;
+            padding: 16px;
+            border-radius: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            font-size: 1rem;
+            touch-action: manipulation;
+            /* Improves touch response */
+            transition: transform 0.1s, opacity 0.2s;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        button:active {
+            transform: scale(0.97);
+        }
+
+        button:disabled {
+            background: #475569;
+            color: #94a3b8;
+            cursor: not-allowed;
+        }
+
+        /* Button Flash Animation */
+        @keyframes button-flash {
+            0% {
+                background: var(--active-color);
+                box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.7);
+            }
+
+            50% {
+                background: #e2e8f0;
+                box-shadow: 0 0 20px 10px rgba(56, 189, 248, 0.5);
+            }
+
+            100% {
+                background: var(--active-color);
+                box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+            }
+        }
+
+        .btn-animate {
+            animation: button-flash 0.3s ease-out;
+        }
+
+        .btn-secondary {
+            background: #475569;
+            color: white;
+        }
+
+        .btn-match {
+            height: auto;
+            min-height: 70px;
+            /* Ensure tall hit target */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-match small {
+            font-size: 0.75rem;
+            font-weight: 400;
+            margin-top: 4px;
+            opacity: 0.8;
+        }
+
+        #feedback {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 2rem;
+            font-weight: 900;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+            z-index: 50;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.1s, transform 0.1s;
+        }
+
+        #feedback.show {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1.2);
+        }
+
+        .chart-container {
+            position: relative;
+            margin: 20px 0;
+            height: 200px;
+        }
+
+        .chart-fallback {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.05);
+            color: #94a3b8;
+            border-radius: 12px;
+        }
+
+        .good {
+            color: var(--success-color);
+        }
+
+        .bad {
+            color: var(--danger-color);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Small Mobile Optimization */
+        @media (max-width: 360px) {
+            body {
+                padding: 10px;
+            }
+
+            h1 {
+                font-size: 1.5rem;
+            }
+
+            .n-back-grid {
+                gap: 6px;
+            }
+
+            .btn-match {
+                min-height: 60px;
+                font-size: 0.9rem;
+            }
+
+            .controls {
+                gap: 10px;
+            }
+
+            #levels-grid {
+                grid-template-columns: repeat(4, 1fr) !important;
+            }
+        }
+
+        .level-btn {
+            padding: 10px;
+            border-radius: 8px;
+            background: #334155;
+            color: #94a3b8;
+            font-weight: bold;
+            border: 1px solid transparent;
+            cursor: pointer;
+        }
+
+        .level-btn.unlocked {
+            background: #1e293b;
+            color: var(--active-color);
+            border: 1px solid var(--active-color);
+        }
+
+        .level-btn.completed {
+            background: rgba(34, 197, 94, 0.2);
+            color: var(--success-color);
+            border: 1px solid var(--success-color);
+        }
+
+        .level-btn.locked {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="app">
+
+        <header>
+            <h1>N-Back Focus</h1>
+            <p style="text-align: center; opacity: 0.7; margin-bottom: 20px;">Build Unbreakable Mental Strength</p>
+        </header>
+
+        <!-- Dashboard View -->
+        <div id="dashboard-view" class="active">
+            <div class="card">
+                <h3>30-Day Focus Challenge</h3>
+                <div style="margin: 20px 0; height: 200px;">
+                    <canvas id="progressChart"></canvas>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-value" id="current-n-level">N=1</div>
+                        <div class="stat-label">Current Difficulty</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value" id="day-streak">Day 1</div>
+                        <div class="stat-label">Of 30</div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 20px; text-align: center;">
+                    <p id="recommendation" style="margin-bottom: 15px; font-size: 0.9rem; color: #94a3b8;">
+                        Ready for your daily 2-minute brain workout?
+                    </p>
+                    <button id="start-btn" class="btn-primary" style="width: 100%; margin-bottom: 10px;">Start Quick
+                        Session</button>
+                    <button id="levels-btn" class="btn-secondary" style="width: 100%;">Select Level (1-30)</button>
+                    <button id="how-to-play-btn" class="btn-secondary"
+                        style="width: 100%; margin-top: 10px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2);">Kaisey
+                        Khelein (How to Play)</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- How to Play Modal -->
+        <div id="how-to-play-modal" class="hidden"
+            style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 20px;">
+            <div class="card" style="max-width: 500px; max-height: 90vh; overflow-y: auto; text-align: left;">
+                <h2 style="color: var(--active-color); margin-bottom: 15px;">Kaisey Khelein? (Guide)</h2>
+
+                <h4 style="color: #fff; margin-bottom: 5px;">1. Maqsad (Goal)</h4>
+                <p style="color: #94a3b8; margin-bottom: 15px; font-size: 0.9rem;">
+                    Aap ko screen par <strong>Do (2)</strong> cheezein yaad rakhni hain:
+                    <br>1. Box kahan chamak raha hai (Position).
+                    <br>2. Konsa letter bola ja raha hai (Audio).
+                </p>
+
+                <h4 style="color: #fff; margin-bottom: 5px;">2. Match Kab Karna Hai?</h4>
+                <p style="color: #94a3b8; margin-bottom: 15px; font-size: 0.9rem;">
+                    Aap ko <strong>"N" steps peechay</strong> dekhna hai. Shuru mein <strong>N=1</strong> hota hai.
+                    <br><br>
+                    <strong>Agar N=1 hai:</strong>
+                    <br>To dekhein ke kya <strong>abhi</strong> wali cheez <strong>pichli baar (1 step peechay)</strong>
+                    wali se milti hai?
+                    <br><br>
+                    <strong>Agar N=2 hai:</strong>
+                    <br>To dekhein ke kya anhi wali cheez <strong>2 steps peechay</strong> wali se milti hai?
+                </p>
+
+                <h4 style="color: #fff; margin-bottom: 5px;">3. Buttons</h4>
+                <ul style="color: #94a3b8; margin-bottom: 15px; font-size: 0.9rem; list-style-position: inside;">
+                    <li><strong>Position Match:</strong> Agar Box wahi chamkay jahan N steps pehlay tha.</li>
+                    <li><strong>Sound Match:</strong> Agar Letter wahi bola jaye jo N steps pehlay tha.</li>
+                </ul>
+
+                <button id="close-tutorial-btn" class="btn-primary" style="width: 100%;">Samjh Gaya (Close)</button>
+            </div>
+        </div>
+
+        <!-- Levels View -->
+        <div id="levels-view" class="hidden">
+            <div class="card">
+                <h3>Select Challenge Level</h3>
+                <p style="text-align: center; font-size: 0.8rem; margin-bottom: 15px; opacity: 0.7;">Complete a level
+                    with >80% score to unlock the next.</p>
+                <div id="levels-grid" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px;">
+                    <!-- Generated by JS -->
+
+
+                </div>
+                <button onclick="switchView('dash')" class="btn-secondary" style="width: 100%; margin-top: 20px;">Back
+                    to Dashboard</button>
+            </div>
+        </div>
+
+        <!-- Game View -->
+        <div id="game-view" class="hidden">
+            <div class="card"
+                style="padding: 10px; display: flex; justify-content: space-between; align-items: center;">
+                <span>N-Back: <strong id="game-n-level" style="color: var(--active-color)">1</strong></span>
+                <span id="timer">02:00</span>
+            </div>
+
+            <div id="game-area">
+                <div class="n-back-grid" id="grid">
+                    <div class="grid-cell" data-idx="0"></div>
+                    <div class="grid-cell" data-idx="1"></div>
+                    <div class="grid-cell" data-idx="2"></div>
+                    <div class="grid-cell" data-idx="3"></div>
+                    <div class="grid-cell" data-idx="4"></div>
+                    <div class="grid-cell" data-idx="5"></div>
+                    <div class="grid-cell" data-idx="6"></div>
+                    <div class="grid-cell" data-idx="7"></div>
+                    <div class="grid-cell" data-idx="8"></div>
+                </div>
+
+                <div id="feedback"></div>
+
+                <div class="controls">
+                    <button id="btn-audio" class="btn-match" aria-label="Audio Match">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                        </svg>
+                        <small>Sound</small>
+                    </button>
+                    <button id="btn-position" class="btn-match" aria-label="Position Match">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                            <line x1="9" y1="3" x2="9" y2="21"></line>
+                            <line x1="15" y1="3" x2="15" y2="21"></line>
+                            <line x1="3" y1="9" x2="21" y2="9"></line>
+                            <line x1="3" y1="15" x2="21" y2="15"></line>
+                        </svg>
+                        <small>Position</small>
+                    </button>
+                </div>
+
+                <button id="end-session-btn" class="btn-secondary"
+                    style="width: 100%; margin-top: 10px; background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444;">
+                    End Session (Cancel)
+                </button>
+            </div>
+        </div>
+
+        <!-- Results View -->
+        <div id="results-view" class="hidden">
+            <div class="card" style="text-align: center;">
+                <h2>Session Complete!</h2>
+                <div style="font-size: 3rem; font-weight: bold; margin: 20px 0; color: var(--active-color);"
+                    id="score-display">85%</div>
+                <p id="score-message">Excellent focus!</p>
+
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-value" id="res-position">0/0</div>
+                        <div class="stat-label">Position Accuracy</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value" id="res-audio">0/0</div>
+                        <div class="stat-label">Audio Accuracy</div>
+                    </div>
+                </div>
+
+                <div
+                    style="margin: 20px 0; padding: 15px; background: rgba(34, 197, 94, 0.1); border-radius: 8px; border-left: 4px solid var(--success-color);">
+                    <p style="font-style: italic;" id="success-quote">"Focus is the key to all success."</p>
+                </div>
+
+                <button onclick="location.reload()" style="width: 100%;">Return to Dashboard</button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Custom Confirmation Modal -->
+    <div id="confirmation-modal" class="hidden"
+        style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 100; display: flex; align-items: center; justify-content: center;">
+        <div class="card" style="max-width: 320px; text-align: center; border: 1px solid #334155;">
+            <h3 style="color: var(--danger-color); margin-bottom: 10px;">Stop Session?</h3>
+            <p style="color: #94a3b8; margin-bottom: 20px;">Current progress for this session will be lost.</p>
+            <div style="display: flex; gap: 10px;">
+                <button id="modal-cancel-btn" class="btn-secondary">Keep Playing</button>
+                <button id="modal-confirm-btn" style="background: var(--danger-color); color: white;">Stop</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        const CONFIG = {
+            stimulusDuration: 1000, // Time stimulus is active
+            interStimulusInterval: 2500, // Time between stimuli (start to start)
+            sessionDuration: 120, // Seconds (2 minutes)
+            passingScore: 80, // Percent to level up
+            letters: ['A', 'B', 'C', 'L', 'R', 'S', 'T', 'H']
+        };
+
+        // --- State ---
+        let state = {
+            n: 1,
+            history: [],
+            currentIndex: 0,
+            score: { position: { correct: 0, total: 0, falseAlarm: 0, miss: 0 }, audio: { correct: 0, total: 0, falseAlarm: 0, miss: 0 } },
+            isPlaying: false,
+            userInput: { position: false, audio: false },
+            day: 1,
+            dailyScores: [],
+            maxUnlockedLevel: 1,
+            currentLevel: 1
+        };
+
+        // --- Audio Controller (Web Audio API) ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        const sounds = {
+            playTone: (freq, type, duration) => {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            },
+            click: () => sounds.playTone(600, 'sine', 0.05),
+            success: () => {
+                sounds.playTone(800, 'sine', 0.1);
+                setTimeout(() => sounds.playTone(1200, 'sine', 0.2), 100);
+            },
+            error: () => {
+                sounds.playTone(200, 'sawtooth', 0.2);
+                setTimeout(() => sounds.playTone(150, 'sawtooth', 0.2), 100);
+            },
+            levelUp: () => {
+                // Victory Arpeggio
+                [523.25, 659.25, 783.99, 1046.50].forEach((freq, i) => {
+                    setTimeout(() => sounds.playTone(freq, 'triangle', 0.3), i * 150);
+                });
+            }
+        };
+
+        // --- Speech Synthesis Optimization ---
+        const synth = window.speechSynthesis;
+        let preferredVoice = null;
+
+        function loadVoices() {
+            const voices = synth.getVoices();
+            // Try to find a high-quality female or Google/Microsoft natural voice
+            preferredVoice = voices.find(v => v.name.includes('Google US English')) ||
+                voices.find(v => v.name.includes('Zira')) ||
+                voices.find(v => v.name.includes('Samantha')) ||
+                voices.find(v => v.lang === 'en-US');
+        }
+
+        // Browsers load voices asynchronously
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = loadVoices;
+        }
+
+        function speakWait(letter) {
+            if (synth.speaking) synth.cancel();
+
+            // Map letter to a phonetic word for clarity if it's confusing, 
+            // but N-Back usually strictly uses letters. 
+            // We'll stick to letters but slow it down slightly for clarity.
+            const utter = new SpeechSynthesisUtterance(letter);
+
+            if (preferredVoice) utter.voice = preferredVoice;
+
+            utter.rate = 0.9; // Slightly slower for clarity
+            utter.pitch = 1.1; // Slightly higher pitch often sounds clearer
+            utter.volume = 1.0;
+
+            synth.speak(utter);
+        }
+
+        // --- DOM Elements ---
+        const els = {
+            views: {
+                dash: document.getElementById('dashboard-view'),
+                levels: document.getElementById('levels-view'),
+                game: document.getElementById('game-view'),
+                results: document.getElementById('results-view')
+            },
+            gridCells: document.querySelectorAll('.grid-cell'),
+            feedback: document.getElementById('feedback'),
+            timer: document.getElementById('timer'),
+            chart: document.getElementById('progressChart'),
+            levelsGrid: document.getElementById('levels-grid')
+        };
+
+        // --- Initialization ---
+        let chartInstance = null;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            try {
+                loadProgress();
+            } catch (e) {
+                console.error("Failed to load progress:", e);
+            }
+
+            try {
+                if (typeof Chart !== 'undefined') {
+                    renderChart();
+                } else {
+                    console.warn("Chart.js not loaded");
+                }
+            } catch (e) {
+                console.error("Failed to render chart:", e);
+            }
+
+            try {
+                setupEvents();
+            } catch (e) {
+                console.error("Failed to setup events:", e);
+                alert("Error initializing game controls. Please reload.");
+            }
+
+            // Audio Context unlock for mobile
+            document.body.addEventListener('touchstart', function () {
+                if (synth.paused) synth.resume();
+            }, { once: true });
+        });
+
+        function loadProgress() {
+            const saved = localStorage.getItem('nback_progress');
+            if (saved) {
+                const data = JSON.parse(saved);
+                state.n = data.n || 1;
+                state.day = data.dailyScores.length + 1;
+                state.dailyScores = data.dailyScores || [];
+                state.maxUnlockedLevel = data.maxUnlockedLevel || 1;
+            }
+            document.getElementById('current-n-level').innerText = `Lvl ${state.maxUnlockedLevel}`;
+            document.getElementById('day-streak').innerText = `Day ${state.day}`;
+            document.getElementById('game-n-level').innerText = getNForLevel(state.currentLevel); // Show N based on level
+        }
+
+        function saveProgress() {
+            localStorage.setItem('nback_progress', JSON.stringify({
+                n: state.n,
+                dailyScores: state.dailyScores,
+                maxUnlockedLevel: state.maxUnlockedLevel
+            }));
+        }
+
+        function getNForLevel(lvl) {
+            // Difficulty Curve:
+            // 1-5: N=1
+            // 6-10: N=2
+            // 11-15: N=3
+            // ...
+            return Math.floor((lvl - 1) / 5) + 1;
+        }
+
+        function renderLevels() {
+            els.levelsGrid.innerHTML = '';
+            for (let i = 1; i <= 30; i++) {
+                const btn = document.createElement('button');
+                btn.className = 'level-btn';
+                btn.innerText = i;
+
+                if (i <= state.maxUnlockedLevel) {
+                    btn.classList.add('unlocked');
+                    btn.onclick = () => startLevel(i);
+                } else {
+                    btn.classList.add('locked');
+                    btn.disabled = true;
+                }
+
+                // Mark completed levels (visual only, simplified)
+                if (i < state.maxUnlockedLevel) {
+                    btn.classList.add('completed');
+                    btn.innerHTML += ' ✓';
+                }
+
+                els.levelsGrid.appendChild(btn);
+            }
+        }
+
+        function startLevel(lvl) {
+            state.currentLevel = lvl;
+            state.n = getNForLevel(lvl);
+            document.getElementById('game-n-level').innerText = state.n;
+            startGame();
+        }
+
+        function setupEvents() {
+            document.getElementById('start-btn').onclick = () => startLevel(state.maxUnlockedLevel);
+            document.getElementById('levels-btn').onclick = () => {
+                renderLevels();
+                switchView('levels');
+            };
+
+            switchView('dash');
+            // Interaction Handlers
+            const handleInput = (type) => {
+                if (!state.isPlaying) return;
+
+                // Visual Feedback Animation
+                const btn = document.getElementById(`btn-${type}`);
+                if (btn) {
+                    btn.classList.remove('btn-animate');
+                    void btn.offsetWidth; // Trigger reflow
+                    btn.classList.add('btn-animate');
+                }
+
+                // Haptic Feedback
+                if (navigator.vibrate) navigator.vibrate(50);
+
+                sounds.click();
+
+                // Prevent double verify for same step
+                if (state.userInput[type]) return;
+                state.userInput[type] = true;
+
+                // Check match immediately for feedback
+                // Correctly identify the CURRENT stimulus (last one pushed)
+                const currentStimIndex = state.currentIndex - 1;
+                const matchIndex = currentStimIndex - state.n;
+
+                if (matchIndex >= 0) {
+                    const current = state.history[currentStimIndex];
+                    const past = state.history[matchIndex];
+
+                    let isMatch = false;
+                    if (type === 'position') isMatch = current.position === past.position;
+                    if (type === 'audio') isMatch = current.letter === past.letter;
+
+                    if (isMatch) {
+                        showFeedback("Correct!", "good");
+                        sounds.success();
+                        state.score[type].correct++;
+                    } else {
+                        showFeedback("Wrong!", "bad");
+                        sounds.error();
+                        state.score[type].falseAlarm++;
+                    }
+                } else {
+                    showFeedback("Too Early", "bad");
+                    sounds.error();
+                }
+            };
+
+            switchView('dash');
+
+            // How to Play Modal Logic
+            const guideModal = document.getElementById('how-to-play-modal');
+
+            // Use pointerdown for instant reaction on both mobile and desktop
+            const bindBtn = (id, callback) => {
+                const btn = document.getElementById(id);
+                if (!btn) return;
+
+                const newBtn = btn.cloneNode(true);
+                btn.parentNode.replaceChild(newBtn, btn);
+
+                newBtn.addEventListener('pointerdown', (e) => {
+                    e.preventDefault();
+                    callback();
+                    // Ensure focus doesn't stay on button to avoid keyboard accidents
+                    newBtn.blur();
+                });
+            };
+
+            // Bind Game Buttons
+            bindBtn('btn-position', () => handleInput('position'));
+            bindBtn('btn-audio', () => handleInput('audio'));
+
+            bindBtn('how-to-play-btn', () => {
+                guideModal.classList.remove('hidden');
+                guideModal.style.display = 'flex';
+            });
+            bindBtn('close-tutorial-btn', () => {
+                guideModal.classList.add('hidden');
+                guideModal.style.display = 'none';
+            });
+
+
+            // Keyboard Access
+            document.addEventListener('keydown', (e) => {
+                if (e.code === 'KeyA') handleInput('audio');
+                if (e.code === 'KeyL') handleInput('position');
+                if (e.code === 'Escape' && state.isPlaying) document.getElementById('end-session-btn').click();
+            });
+
+            // End Session
+            const modal = document.getElementById('confirmation-modal');
+            const confirmBtn = document.getElementById('modal-confirm-btn');
+            const cancelBtn = document.getElementById('modal-cancel-btn');
+
+            document.getElementById('end-session-btn').onclick = () => {
+                modal.classList.remove('hidden');
+                modal.style.display = 'flex';
+            };
+
+            cancelBtn.onclick = () => {
+                modal.classList.add('hidden');
+                modal.style.display = 'none';
+            };
+
+            confirmBtn.onclick = () => {
+                modal.classList.add('hidden');
+                modal.style.display = 'none';
+                state.isPlaying = false;
+                clearInterval(gameInterval);
+                clearInterval(timerInterval);
+                switchView('dash');
+            };
+        }
+
+        // --- Game Logic ---
+        let gameInterval;
+        let timerInterval;
+
+        function startGame() {
+            state.isPlaying = true;
+            state.currentIndex = 0;
+            state.history = [];
+            state.score = { position: { correct: 0, total: 0, falseAlarm: 0, miss: 0 }, audio: { correct: 0, total: 0, falseAlarm: 0, miss: 0 } };
+            state.userInput = { position: false, audio: false };
+
+            switchView('game');
+
+            // Start Timer
+            let timeLeft = CONFIG.sessionDuration;
+            els.timer.innerText = formatTime(timeLeft);
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                els.timer.innerText = formatTime(timeLeft);
+                if (timeLeft <= 0) endGame();
+            }, 1000);
+
+            // Start Game Loop
+            nextTurn(); // First turn immediately
+            gameInterval = setInterval(nextTurn, CONFIG.interStimulusInterval);
+        }
+
+        function nextTurn() {
+            if (!state.isPlaying) return;
+
+            // 1. Process Misses from previous turn (if any)
+            if (state.currentIndex > 0) {
+                const prevIndex = state.currentIndex - 1;
+                const matchIndex = prevIndex - state.n;
+
+                if (matchIndex >= 0) {
+                    const prevStim = state.history[prevIndex];
+                    const pastStim = state.history[matchIndex];
+
+                    // Check Position Miss
+                    if (prevStim.position === pastStim.position && !state.userInput.position) {
+                        state.score.position.miss++;
+                        // console.log("Missed Position Match");
+                    }
+                    if (prevStim.position === pastStim.position) state.score.position.total++;
+
+                    // Check Audio Miss
+                    if (prevStim.letter === pastStim.letter && !state.userInput.audio) {
+                        state.score.audio.miss++;
+                        // console.log("Missed Audio Match");
+                    }
+                    if (prevStim.letter === pastStim.letter) state.score.audio.total++;
+                }
+            }
+
+            // 2. Generate New Stimuli
+            // Small chance to force a match (approx 30%) to make it engaging
+            const forceMatch = Math.random() < 0.3 && state.currentIndex >= state.n;
+
+            let pos, letter;
+
+            if (forceMatch) {
+                // Determine which match to force (pos, audio, or both)
+                const type = Math.random();
+                const pastStim = state.history[state.currentIndex - state.n];
+
+                if (type < 0.4) { // Position
+                    pos = pastStim.position;
+                    letter = randomLetter();
+                } else if (type < 0.8) { // Audio
+                    pos = randomPosition();
+                    letter = pastStim.letter;
+                } else { // Both
+                    pos = pastStim.position;
+                    letter = pastStim.letter;
+                }
+            } else {
+                pos = randomPosition();
+                letter = randomLetter();
+            }
+
+            const stimulus = { position: pos, letter: letter };
+            state.history.push(stimulus);
+
+            // 3. Present Stimuli
+            activateGrid(pos);
+            speakWait(letter);
+
+            // Reset Input for this turn
+            state.userInput = { position: false, audio: false };
+
+            state.currentIndex++;
+        }
+
+        function endGame() {
+            state.isPlaying = false;
+            clearInterval(gameInterval);
+            clearInterval(timerInterval);
+
+            // Calculate Scores
+            // Process the FINAL turn's misses
+            const finalIndex = state.currentIndex - 1;
+            const matchIndex = finalIndex - state.n;
+            if (matchIndex >= 0) {
+                const prevStim = state.history[finalIndex];
+                const pastStim = state.history[matchIndex];
+
+                if (prevStim.position === pastStim.position && !state.userInput.position) state.score.position.miss++;
+                if (prevStim.position === pastStim.position) state.score.position.total++;
+
+                if (prevStim.letter === pastStim.letter && !state.userInput.audio) state.score.audio.miss++;
+                if (prevStim.letter === pastStim.letter) state.score.audio.total++;
+            }
+
+            // Accuracy = Correct Matches / (Total Expected Matches + False Alarms)
+            // Note: Simplistic scoring. 
+            // Better Metric: F1 Score or simple percentage of valid responses.
+            // Let's use: (Correct / Total Opportunities) * 100
+            // But we must penalize False Alarms. 
+            // Logic: Total Score = (Correct Pos + Correct Aud) / (Total Pos Matches + Total Aud Matches + False Alarms)
+
+            const posTotal = state.score.position.total + state.score.position.falseAlarm;
+            const audTotal = state.score.audio.total + state.score.audio.falseAlarm;
+
+            const posAcc = posTotal === 0 ? 100 : Math.round((state.score.position.correct / posTotal) * 100);
+            const audAcc = audTotal === 0 ? 100 : Math.round((state.score.audio.correct / audTotal) * 100);
+
+            const avgScore = Math.round((posAcc + audAcc) / 2);
+
+            // Update State
+            state.dailyScores.push({ day: state.day, score: avgScore, n: state.n });
+
+            // Level Up/Down Logic
+            if (avgScore >= CONFIG.passingScore) {
+                if (state.currentLevel === state.maxUnlockedLevel && state.maxUnlockedLevel < 30) {
+                    state.maxUnlockedLevel++;
+                    document.getElementById('score-message').innerText = "Level Complete! Next Level Unlocked.";
+                    document.getElementById('score-message').style.color = "var(--success-color)";
+                    sounds.levelUp();
+                } else {
+                    document.getElementById('score-message').innerText = "Level Passed!";
+                    document.getElementById('score-message').style.color = "var(--success-color)";
+                    sounds.success();
+                }
+            } else {
+                document.getElementById('score-message').innerText = "Try Again to Unlock Next Level.";
+                document.getElementById('score-message').style.color = "var(--text-color)";
+            }
+
+            saveProgress();
+
+            // Display Results
+            document.getElementById('score-display').innerText = `${avgScore}%`;
+            document.getElementById('res-position').innerText = `${state.score.position.correct}/${state.score.position.total} (${posAcc}%)`;
+            document.getElementById('res-audio').innerText = `${state.score.audio.correct}/${state.score.audio.total} (${audAcc}%)`;
+
+            const quote = getRandomQuote();
+            document.getElementById('success-quote').innerText = `"${quote}"`;
+
+            switchView('results');
+        }
+
+
+        // --- Helpers ---
+        function activateGrid(idx) {
+            const cell = document.querySelector(`.grid-cell[data-idx="${idx}"]`);
+            if (cell) {
+                cell.classList.add('active');
+                setTimeout(() => cell.classList.remove('active'), CONFIG.stimulusDuration);
+            }
+        }
+
+        function switchView(viewName) {
+            Object.values(els.views).forEach(el => el.classList.add('hidden'));
+            els.views[viewName].classList.remove('hidden');
+        }
+
+        function showFeedback(msg, type) {
+            els.feedback.innerText = msg;
+            els.feedback.className = type;
+            els.feedback.classList.add('show');
+            setTimeout(() => els.feedback.classList.remove('show'), 800);
+        }
+
+        function randomPosition() { return Math.floor(Math.random() * 9); }
+        function randomLetter() { return CONFIG.letters[Math.floor(Math.random() * CONFIG.letters.length)]; }
+        function formatTime(s) {
+            const min = Math.floor(s / 60);
+            const sec = s % 60;
+            return `${min}:${sec < 10 ? '0' : ''}${sec}`;
+        }
+
+        function getRandomQuote() {
+            const quotes = [
+                "The mind connects what the eyes cannot see.",
+                "Discipline is the bridge between goals and accomplishment.",
+                "Concentration is the secret of strength.",
+                "Your focus determines your reality.",
+                "Mental endurance is built one rep at a time.",
+                "Distraction is the enemy of greatness."
+            ];
+            return quotes[Math.floor(Math.random() * quotes.length)];
+        }
+
+        function renderChart() {
+            const chartContainer = els.chart.parentElement;
+            let fallback = chartContainer.querySelector('.chart-fallback');
+
+            if (typeof Chart === 'undefined') {
+                els.chart.style.display = 'none';
+                if (!fallback) {
+                    fallback = document.createElement('div');
+                    fallback.className = 'chart-fallback';
+                    fallback.innerText = "Chart Loading...";
+                    chartContainer.appendChild(fallback);
+                }
+                return;
+            }
+
+            // Clean up fallback
+            if (fallback) fallback.remove();
+            els.chart.style.display = 'block';
+
+            const ctx = els.chart.getContext('2d');
+            const dataPoints = state.dailyScores.map(d => d.score);
+            const labels = state.dailyScores.map(d => `Day ${d.day}`);
+
+            // Destroy existing chart if it exists
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            if (dataPoints.length === 0) {
+                // No data yet
+            }
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Fluid Intelligence (Score)',
+                        data: dataPoints,
+                        borderColor: '#38bdf8',
+                        backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            grid: { color: '#334155' }
+                        },
+                        x: { grid: { display: false } }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#e2e8f0' } }
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+
+</html>
