@@ -623,13 +623,9 @@
             }
 
             try {
-                if (typeof Chart !== 'undefined') {
-                    renderChart();
-                } else {
-                    console.warn("Chart.js not loaded");
-                }
+                renderStats();
             } catch (e) {
-                console.error("Failed to render chart:", e);
+                console.error("Failed to render stats:", e);
             }
 
             try {
@@ -1036,66 +1032,44 @@
             return quotes[Math.floor(Math.random() * quotes.length)];
         }
 
-        function renderChart() {
-            const chartContainer = els.chart.parentElement;
-            let fallback = chartContainer.querySelector('.chart-fallback');
+        function renderStats() {
+            // Update Top Stats
+            const sessions = state.dailyScores.length;
+            const avg = sessions > 0
+                ? Math.round(state.dailyScores.reduce((a, b) => a + b.score, 0) / sessions)
+                : 0;
 
-            if (typeof Chart === 'undefined') {
-                els.chart.style.display = 'none';
-                if (!fallback) {
-                    fallback = document.createElement('div');
-                    fallback.className = 'chart-fallback';
-                    fallback.innerText = "Chart Loading...";
-                    chartContainer.appendChild(fallback);
-                }
+            document.getElementById('stat-max-n').innerText = state.maxUnlockedLevel;
+            document.getElementById('stat-sessions').innerText = sessions;
+            document.getElementById('stat-avg-score').innerText = `${avg}%`;
+            document.getElementById('stat-streak').innerText = state.day;
+
+            // Update History List
+            const historyContainer = document.getElementById('history-list');
+            if (!historyContainer) return;
+
+            historyContainer.innerHTML = '';
+
+            if (sessions === 0) {
+                historyContainer.innerHTML = '<div style="padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.1);">No sessions yet.</div>';
                 return;
             }
 
-            // Clean up fallback
-            if (fallback) fallback.remove();
-            els.chart.style.display = 'block';
+            // Show last 7 entries reverse chronological
+            state.dailyScores.slice().reverse().slice(0, 10).forEach(entry => {
+                const item = document.createElement('div');
+                item.style.padding = '8px';
+                item.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
+                item.style.display = 'flex';
+                item.style.justifyContent = 'space-between';
 
-            const ctx = els.chart.getContext('2d');
-            const dataPoints = state.dailyScores.map(d => d.score);
-            const labels = state.dailyScores.map(d => `Day ${d.day}`);
+                const scoreColor = entry.score >= CONFIG.passingScore ? 'var(--success-color)' : 'var(--danger-color)';
 
-            // Destroy existing chart if it exists
-            if (chartInstance) {
-                chartInstance.destroy();
-            }
-
-            if (dataPoints.length === 0) {
-                // No data yet
-            }
-
-            chartInstance = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Fluid Intelligence (Score)',
-                        data: dataPoints,
-                        borderColor: '#38bdf8',
-                        backgroundColor: 'rgba(56, 189, 248, 0.1)',
-                        tension: 0.4,
-                        fill: true
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            max: 100,
-                            grid: { color: '#334155' }
-                        },
-                        x: { grid: { display: false } }
-                    },
-                    plugins: {
-                        legend: { labels: { color: '#e2e8f0' } }
-                    }
-                }
+                item.innerHTML = `
+                    <span>Day ${entry.day} (N=${entry.n})</span>
+                    <span style="color: ${scoreColor}; font-weight: bold;">${entry.score}%</span>
+                `;
+                historyContainer.appendChild(item);
             });
         }
     </script>

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'n-back-v2';
+const CACHE_NAME = 'n-back-v3';
 const ASSETS = [
   './index.html',
   './js/chart.js',
